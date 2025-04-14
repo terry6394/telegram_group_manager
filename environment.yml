@@ -1,0 +1,11 @@
+name: telegram-bot
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pip>=22.0.0
+  - pip:
+    - python-telegram-bot
+    - python-dotenv
+
