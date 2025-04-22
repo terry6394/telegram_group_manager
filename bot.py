@@ -45,80 +45,197 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("未设置BOT_TOKEN环境变量。请在.env文件中设置。")
 
+import json
+
+# 配置文件路径
+GROUPS_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'groups.json')
+DELETION_QUEUE_FILE = os.path.join(os.path.dirname(__file__), 'deletion_queue.json')
+DELETION_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'deletion_config.json')
+
 # 存储需要监控的群组
 monitored_groups: Dict[int, Dict[str, Any]] = {}
+deletion_queue: List[Dict[str, Any]] = []
+deletion_time: str = '00:00'
+# 保存定时任务引用
+_deletion_job = None
+
+def load_monitored_groups():
+    global monitored_groups
+    try:
+        with open(GROUPS_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            groups = json.load(f)
+            monitored_groups = {g['id']: {"name": g["name"]} for g in groups}
+    except Exception as e:
+        logging.warning(f"加载群组配置失败: {e}")
+        monitored_groups = {}
+
+def save_monitored_groups():
+    groups = [{"id": gid, "name": info["name"]} for gid, info in monitored_groups.items()]
+    try:
+        with open(GROUPS_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(groups, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        logging.error(f"保存群组配置失败: {e}")
+
+def load_deletion_queue():
+    global deletion_queue
+    try:
+        with open(DELETION_QUEUE_FILE, 'r', encoding='utf-8') as f:
+            deletion_queue = json.load(f)
+    except Exception as e:
+        logging.warning(f"加载删除队列失败: {e}")
+        deletion_queue = []
+
+def save_deletion_queue():
+    try:
+        with open(DELETION_QUEUE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(deletion_queue, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        logging.error(f"保存删除队列失败: {e}")
+
+def load_deletion_config():
+    global deletion_time
+    try:
+        with open(DELETION_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+            deletion_time = cfg.get('deletion_time', deletion_time)
+    except Exception as e:
+        logging.warning(f"加载删除配置失败: {e}")
+
+def save_deletion_config():
+    try:
+        with open(DELETION_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'deletion_time': deletion_time}, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        logging.error(f"保存删除配置失败: {e}")
+
+# 启动时加载配置
+def initialize_monitored_groups():
+    load_monitored_groups()
+    load_deletion_queue()
+    load_deletion_config()
+
+initialize_monitored_groups()
 
 # 命令处理函数
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理/start命令"""
+    """Handle /start command"""
     await update.message.reply_text(
-        "你好！我是一个群组管理机器人，可以根据消息反应删除不适当的内容。\n"
-        "使用 /help 查看可用命令。"
+        "Hello! I'm a Telegram group management bot that deletes inappropriate content based on message reactions.\n"
+        "Use /help to see available commands."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理/help命令"""
+    """Handle /help command and show usage"""
     help_text = (
-        "可用命令:\n"
-        "/start - 启动机器人\n"
-        "/help - 显示此帮助信息\n"
-        "/monitor - 开始监控当前群组的反应\n"
-        "/stopmonitor - 停止监控当前群组\n"
-        "/status - 显示机器人状态\n\n"
-        "功能说明:\n"
-        "- 当消息收到1个或更多👎反应时，该消息将被自动删除\n"
-        "- 对于匿名反应，当消息收到3个或更多👎反应时，该消息将被自动删除\n"
-        "- 机器人需要具有管理员权限并能够删除消息才能正常工作"
+        "<b>🤖 Telegram Group Management Bot Help</b>\n\n"
+        "<b>Basic Commands:</b>\n"
+        "  /start - Start the bot\n"
+        "  /help - Show this help message\n"
+        "  /monitor - Enable reaction monitoring in current group\n"
+        "  /stopmonitor - Disable reaction monitoring in current group\n"
+        "  /status - Show current group status and pending deletions\n"
+        "  /set_deletion_time HH:MM - Schedule daily deletion of 💩-marked messages at given time\n"
+        "  /trigger_deletion - Manually trigger batch deletion now\n\n"
+        "<b>Features:</b>\n"
+        "  • Messages with 1 or more 💩 reactions are deleted immediately.\n"
+        "  • Messages with 👎 reactions are queued for daily batch deletion.\n"
+        "  • Bot must be admin with delete permissions.\n"
+        "\n<b>Examples:</b>\n"
+        "  /set_deletion_time 23:00\n"
+        "  /status\n"
+        "  /trigger_deletion\n"
     )
-    await update.message.reply_text(help_text)
+    await update.message.reply_text(help_text, parse_mode="HTML")
 
 async def monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理/monitor命令，开始监控当前群组"""
+    """Handle /monitor command to start monitoring current group"""
     chat = update.effective_chat
     
     # 确认是群组
     if chat.type not in [Chat.GROUP, Chat.SUPERGROUP]:
-        await update.message.reply_text("此命令只能在群组中使用。")
+        await update.message.reply_text("This command can only be used in groups.")
         return
     
     # 检查机器人是否为管理员
+    from telegram import ChatMemberAdministrator, ChatMemberOwner
     bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
-    if not bot_member.can_delete_messages:
-        await update.message.reply_text("请确保我有删除消息的权限！")
+    if isinstance(bot_member, (ChatMemberAdministrator, ChatMemberOwner)):
+        if not bot_member.can_delete_messages:
+            await update.message.reply_text("Please ensure I have permission to delete messages!")
+            return
+    else:
+        await update.message.reply_text("Please make me an admin with delete permissions to operate properly.")
         return
     
     # 添加到监控列表
     monitored_groups[chat.id] = {
-        "name": chat.title,
-        "started_at": datetime.now(),
-        "started_by": update.effective_user.id
+        "name": chat.title
     }
-    
-    await update.message.reply_text(f"已开始监控此群组的消息反应。")
+    save_monitored_groups()
+    await update.message.reply_text("Reaction monitoring enabled for this group.")
 
 async def stop_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理/stopmonitor命令，停止监控当前群组"""
+    """Handle /stopmonitor command to stop monitoring current group"""
     chat = update.effective_chat
     
     if chat.id in monitored_groups:
         del monitored_groups[chat.id]
-        await update.message.reply_text("已停止监控此群组。")
+        save_monitored_groups()
+        await update.message.reply_text("Stopped reaction monitoring for this group.")
     else:
-        await update.message.reply_text("此群组当前未被监控。")
+        await update.message.reply_text("This group is not currently being monitored.")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """处理/status命令，显示机器人状态"""
+    """Handle /status command and show group status"""
+    import pytz
+    from datetime import datetime as dt
     chat = update.effective_chat
+    now = dt.now(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+    deletion_count = len([item for item in deletion_queue if item['chat_id'] == chat.id])
     
     if chat.id in monitored_groups:
         info = monitored_groups[chat.id]
-        started_at = info["started_at"].strftime("%Y-%m-%d %H:%M:%S")
-        await update.message.reply_text(
-            f"此群组正在被监控。\n"
-            f"开始时间: {started_at}"
+        msg = (
+            f"<b>Group Monitoring Status</b>\n"
+            f"Group Name: <code>{info.get('name', 'Unknown')}</code>\n"
+            f"Group ID: <code>{chat.id}</code>\n"
+            f"Current Time: <code>{now}</code>\n"
+            f"💩 Pending Deletions: <b>{deletion_count}</b> messages\n"
         )
+        await update.message.reply_text(msg, parse_mode="HTML")
     else:
-        await update.message.reply_text("此群组当前未被监控。")
+        await update.message.reply_text("This group is not currently monitored.")
+
+async def set_deletion_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /set_deletion_time command to set daily batch deletion time"""
+    if len(context.args) != 1:
+        await update.message.reply_text("Usage: /set_deletion_time HH:MM")
+        return
+    time_str = context.args[0]
+    try:
+        datetime.strptime(time_str, "%H:%M")
+    except ValueError:
+        await update.message.reply_text("Invalid time format. Please use HH:MM (24-hour format).")
+        return
+    
+    global deletion_time, _deletion_job
+    deletion_time = time_str
+    save_deletion_config()
+    
+    # 移除旧任务
+    if _deletion_job:
+        try:
+            _deletion_job.schedule_removal()
+            logger.info(f"[定时任务] 已移除旧定时任务")
+        except Exception as e:
+            logger.warning(f"[定时任务] 移除旧定时任务失败: {e}")
+    
+    # 安排新任务
+    await schedule_next_deletion(context)
+    await update.message.reply_text(
+        f"Daily deletion time set to {deletion_time}. Next run at {get_next_run_time(deletion_time).strftime('%Y-%m-%d %H:%M:%S')}"
+    )
 
 async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理消息反应事件并根据规则删除消息"""
@@ -135,35 +252,31 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # 获取新增的反应
     new_reactions = reaction.new_reaction
     
-    # 检查是否有👎反应
+    # 💩 reaction: delete immediately
+    for react in new_reactions:
+        if hasattr(react, 'emoji') and react.emoji == "💩":
+            try:
+                await context.bot.delete_message(
+                    chat_id=chat_id,
+                    message_id=reaction.message_id
+                )
+                logger.info(f"Deleted message {reaction.message_id} from group {chat_id} due to 💩 reaction.")
+                await context.bot.send_message(chat_id=chat_id, text="A message has been deleted immediately due to 💩 reaction.")
+            except Exception as e:
+                logger.error(f"Failed to delete message: {e}")
+            return
+
+    # 👎 reaction: add to batch deletion queue
     thumbs_down_count = 0
     for react in new_reactions:
-        # 检查是否为emoji类型的反应，并且是👎
         if hasattr(react, 'type') and react.type == 'emoji' and hasattr(react, 'emoji') and react.emoji == "👎":
             thumbs_down_count += 1
-    
-    # 设置阈值，当👎反应达到或超过此阈值时删除消息
-    # 这里设置为1，你可以根据需要调整
     threshold = 1
-
     if thumbs_down_count >= threshold:
-        try:
-            # 删除原始消息
-            await context.bot.delete_message(
-                chat_id=chat_id,
-                message_id=reaction.message_id
-            )
-            logger.info(
-                f"已删除消息 {reaction.message_id} 来自群组 {chat_id} 因为收到 {thumbs_down_count} 个👎反应"
-            )
-            
-            # 可选：发送通知
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"一条消息因收到负面反应而被删除。"
-            )
-        except Exception as e:
-            logger.error(f"删除消息失败: {e}")
+        deletion_queue.append({'chat_id': chat_id, 'message_id': reaction.message_id})
+        save_deletion_queue()
+        await context.bot.send_message(chat_id=chat_id, text="Message added to deletion queue (👎 reaction). Will be deleted at scheduled time.")
+        logger.info(f"Queued message {reaction.message_id} from group {chat_id} due to {thumbs_down_count} 👎 reactions.")
 
 async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理匿名消息反应计数更新事件"""
@@ -196,27 +309,27 @@ async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TY
                 message_id=reaction_count.message_id
             )
             logger.info(
-                f"已删除消息 {reaction_count.message_id} 来自群组 {chat_id} 因为收到 {thumbs_down_count} 个匿名👎反应"
+                f"Deleted message {reaction_count.message_id} from group {chat_id} due to {thumbs_down_count} anonymous 👎 reactions"
             )
             
             # 可选：发送通知
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"一条消息因收到多个负面反应而被删除。"
+                text="A message has been deleted due to multiple negative reactions."
             )
         except Exception as e:
-            logger.error(f"删除消息失败: {e}")
+            logger.error(f"Failed to delete message: {e}")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理错误"""
-    logger.error(f"更新 {update} 导致错误 {context.error}")
+    logger.error(f"Update {update} caused error {context.error}")
     
     # 获取发生错误的聊天ID（如果可用）
     if isinstance(update, Update) and update.effective_chat:
         chat_id = update.effective_chat.id
         await context.bot.send_message(
             chat_id=chat_id,
-            text="处理请求时出现错误，请稍后再试。"
+            text="An error occurred while processing your request. Please try again later."
         )
 
 async def check_admin_status(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -231,23 +344,116 @@ async def check_admin_status(context: ContextTypes.DEFAULT_TYPE) -> None:
             
             # 检查是否有删除消息的权限
             if not bot_member.can_delete_messages:
-                logger.warning(f"机器人在群组 {info['name']} (ID: {chat_id}) 中失去了删除消息的权限")
+                logger.warning(f"Bot lost delete message permission in group {info['name']} (ID: {chat_id})")
                 groups_to_remove.append(chat_id)
                 
                 # 通知群组
                 await bot.send_message(
                     chat_id=chat_id,
-                    text="我不再具有删除消息的权限，已停止监控此群组。"
+                    text="I no longer have permission to delete messages. Stopping monitoring for this group."
                 )
         except Exception as e:
-            logger.error(f"检查群组 {chat_id} 的管理员状态时出错: {e}")
+            logger.error(f"Failed to check admin status for group {chat_id}: {e}")
             groups_to_remove.append(chat_id)
     
     # 从监控列表中移除没有权限的群组
     for chat_id in groups_to_remove:
         if chat_id in monitored_groups:
             del monitored_groups[chat_id]
-            logger.info(f"已从监控列表中移除群组 {chat_id}")
+            logger.info(f"Removed group {chat_id} from monitoring list")
+
+def get_next_run_time(time_str):
+    """计算下一次运行的时间"""
+    import pytz
+    from datetime import datetime, timedelta
+    
+    # 当前时间（东八区）
+    tz = pytz.timezone('Asia/Shanghai')
+    now = datetime.now(tz)
+    
+    # 解析目标时间
+    hour, minute = map(int, time_str.split(':'))
+    target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    
+    # 如果目标时间已过，则设置为明天同一时间
+    if target_time <= now:
+        target_time += timedelta(days=1)
+    
+    logger.info(f"[定时任务] Next run time set to: {target_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    return target_time
+
+async def schedule_next_deletion(context):
+    """安排下一次删除任务"""
+    global _deletion_job
+    next_run_time = get_next_run_time(deletion_time)
+    _deletion_job = context.job_queue.run_once(
+        process_deletion_queue_wrapper,
+        when=next_run_time
+    )
+    logger.info(f"[定时任务] Scheduled next deletion task for {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+async def process_deletion_queue_wrapper(context):
+    """删除任务的包装器，执行完成后自动调度下一次任务"""
+    await process_deletion_queue(context)
+    await schedule_next_deletion(context)
+
+async def process_deletion_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """批量删除待处理队列中的消息"""
+    global deletion_queue
+    bot = context.bot
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    logger.info("[定时任务] Running batch deletion task, current time: %s, queue length: %d", current_time, len(deletion_queue))
+    failed: List[Dict[str, Any]] = []
+    
+    # 收集需要发送通知的群组
+    chat_ids = set()
+    for entry in deletion_queue:
+        chat_ids.add(entry['chat_id'])
+    
+    if not deletion_queue:
+        logger.info("[定时任务] No messages to delete, skipping.")
+        return
+    
+    # 开始时发送通知
+    for chat_id in chat_ids:
+        if chat_id in monitored_groups:  # 只向被监控的群组发送通知
+            try:
+                count = len([item for item in deletion_queue if item['chat_id'] == chat_id])
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"Starting batch deletion of {count} messages..."
+                )
+            except Exception as e:
+                logger.error(f"[定时任务] Failed to send start notification: {e}")
+    
+    # 执行删除
+    deleted_count = 0
+    for entry in deletion_queue:
+        try:
+            await bot.delete_message(chat_id=entry['chat_id'], message_id=entry['message_id'])
+            logger.info(f"[定时任务] Deleted message {entry['message_id']} from group {entry['chat_id']}")
+            deleted_count += 1
+            await asyncio.sleep(1)
+        except Exception as e:
+            logger.error(f"[定时任务] Failed to delete message: chat_id={entry['chat_id']} message_id={entry['message_id']} error: {e}")
+            failed.append(entry)
+    
+    # 更新队列
+    deletion_queue = failed
+    save_deletion_queue()
+    logger.info("[定时任务] Batch deletion task completed, remaining messages: %d", len(deletion_queue))
+    
+    # 完成时发送通知
+    for chat_id in chat_ids:
+        if chat_id in monitored_groups:  # 只向被监控的群组发送通知
+            try:
+                failed_count = len([item for item in failed if item['chat_id'] == chat_id])
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"Batch deletion completed! Deleted {deleted_count} messages, failed to delete {failed_count} messages."
+                )
+            except Exception as e:
+                logger.error(f"[定时任务] Failed to send completion notification: {e}")
 
 if __name__ == "__main__":
     # 创建应用程序
@@ -259,6 +465,16 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("monitor", monitor))
     application.add_handler(CommandHandler("stopmonitor", stop_monitor))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("set_deletion_time", set_deletion_time))
+    
+    # 手动触发删除命令
+    async def trigger_deletion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /trigger_deletion command to manually start batch deletion"""
+        await update.message.reply_text("Manually triggering batch deletion...")
+        await process_deletion_queue(context)
+        await update.message.reply_text("Batch deletion complete")
+    
+    application.add_handler(CommandHandler("trigger_deletion", trigger_deletion))
     
     # 添加反应处理器
     application.add_handler(MessageReactionHandler(handle_reaction))
@@ -275,7 +491,16 @@ if __name__ == "__main__":
     # 添加定期检查管理员状态的任务（每小时检查一次）
     application.job_queue.run_repeating(check_admin_status, interval=3600)
     
-    logger.info("机器人已启动...")
+    # 定时批量删除任务
+    # 使用 run_once 而不是 run_daily，并在任务执行后自动调度下一次任务
+    next_run_time = get_next_run_time(deletion_time)
+    _deletion_job = application.job_queue.run_once(
+        process_deletion_queue_wrapper,
+        when=next_run_time
+    )
+    logger.info(f"[定时任务] Initialized scheduled deletion task for {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    logger.info("Bot started...")
     
     # 使用内置的轮询方法启动机器人
     application.run_polling(
