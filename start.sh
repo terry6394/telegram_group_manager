@@ -1,72 +1,72 @@
 #!/bin/bash
 
-# 颜色定义
+# Color definitions
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# 默认使用开发环境配置
+# Default to development environment
 COMPOSE_FILE="docker-compose.yml"
 
-# 检查.env文件是否存在
+# Check if .env file exists
 if [ ! -f .env ]; then
-    echo -e "${YELLOW}未找到.env文件，正在从模板创建...${NC}"
+    echo -e "${YELLOW}.env file not found. Creating from template...${NC}"
     cp .env.example .env
-    echo -e "${RED}请编辑.env文件，填入你的BOT_TOKEN后再运行此脚本${NC}"
+    echo -e "${RED}Please edit the .env file and enter your BOT_TOKEN before running this script.${NC}"
     exit 1
 fi
 
-# 检查Docker是否安装
+# Check if Docker is installed
 if ! command -v docker &> /dev/null; then
-    echo -e "${RED}Docker未安装，请先安装Docker${NC}"
-    echo "安装说明: https://docs.docker.com/get-docker/"
+    echo -e "${RED}Docker is not installed. Please install Docker first.${NC}"
+    echo "Installation guide: https://docs.docker.com/get-docker/"
     exit 1
 fi
 
-# 检查docker compose是否可用
+# Check if docker compose is available
 if ! docker compose version &> /dev/null; then
-    echo -e "${RED}docker compose 命令不可用，请确保安装了最新版本的Docker${NC}"
-    echo "安装说明: https://docs.docker.com/compose/install/"
+    echo -e "${RED}docker compose command is not available. Please ensure you have the latest version of Docker installed.${NC}"
+    echo "Installation guide: https://docs.docker.com/compose/install/"
     exit 1
 fi
 
-# 选择环境
+# Environment selection
 select_environment() {
-    echo -e "${GREEN}请选择运行环境:${NC}"
-    echo "1) 开发环境 (docker-compose.yml)"
-    echo "2) 生产环境 (docker-compose.prod.yml)"
-    echo -n "请选择 [1/2] (默认: 1): "
+    echo -e "${GREEN}Please select the running environment:${NC}"
+    echo "1) Development (docker-compose.yml)"
+    echo "2) Production (docker-compose.prod.yml)"
+    echo -n "Select [1/2] (default: 1): "
     read -r env_choice
-    
+
     case $env_choice in
         2)
             COMPOSE_FILE="docker-compose.prod.yml"
-            echo -e "${GREEN}已选择生产环境配置${NC}"
+            echo -e "${GREEN}Production environment selected.${NC}"
             ;;
         *)
             COMPOSE_FILE="docker-compose.yml"
-            echo -e "${GREEN}已选择开发环境配置${NC}"
+            echo -e "${GREEN}Development environment selected.${NC}"
             ;;
     esac
 }
 
-# 显示菜单
+# Show menu
 show_menu() {
-    echo -e "${GREEN}Telegram 群组管理机器人 - Docker管理${NC}"
-    echo "当前环境: ${COMPOSE_FILE}"
-    echo "1) 启动机器人"
-    echo "2) 停止机器人"
-    echo "3) 重启机器人"
-    echo "4) 查看日志"
-    echo "5) 重新构建并启动"
-    echo "6) 查看状态"
-    echo "7) 切换环境"
-    echo "0) 退出"
-    echo -n "请选择: "
+    echo -e "${GREEN}Telegram Group Manager Bot - Docker Management${NC}"
+    echo "Current environment: ${COMPOSE_FILE}"
+    echo "1) Start the bot"
+    echo "2) Stop the bot"
+    echo "3) Restart the bot"
+    echo "4) Show logs"
+    echo "5) Rebuild and start"
+    echo "6) Show status"
+    echo "7) Switch environment"
+    echo "0) Exit"
+    echo -n "Please select: "
 }
 
-# 主循环
+# Main loop
 select_environment
 
 while true; do
@@ -75,46 +75,46 @@ while true; do
 
     case $choice in
         1)
-            echo -e "${GREEN}正在启动机器人...${NC}"
+            echo -e "${GREEN}Starting the bot...${NC}"
             docker compose -f $COMPOSE_FILE up -d
-            echo -e "${GREEN}机器人已启动${NC}"
+            echo -e "${GREEN}Bot started.${NC}"
             ;;
         2)
-            echo -e "${YELLOW}正在停止机器人...${NC}"
+            echo -e "${YELLOW}Stopping the bot...${NC}"
             docker compose -f $COMPOSE_FILE down
-            echo -e "${GREEN}机器人已停止${NC}"
+            echo -e "${GREEN}Bot stopped.${NC}"
             ;;
         3)
-            echo -e "${YELLOW}正在重启机器人...${NC}"
+            echo -e "${YELLOW}Restarting the bot...${NC}"
             docker compose -f $COMPOSE_FILE restart
-            echo -e "${GREEN}机器人已重启${NC}"
+            echo -e "${GREEN}Bot restarted.${NC}"
             ;;
         4)
-            echo -e "${GREEN}显示日志 (按Ctrl+C退出)${NC}"
+            echo -e "${GREEN}Showing logs (press Ctrl+C to exit)${NC}"
             docker compose -f $COMPOSE_FILE logs -f
             ;;
         5)
-            echo -e "${YELLOW}正在重新构建并启动机器人...${NC}"
+            echo -e "${YELLOW}Rebuilding and starting the bot...${NC}"
             docker compose -f $COMPOSE_FILE up -d --build
-            echo -e "${GREEN}机器人已重新构建并启动${NC}"
+            echo -e "${GREEN}Bot rebuilt and started.${NC}"
             ;;
         6)
-            echo -e "${GREEN}机器人状态:${NC}"
+            echo -e "${GREEN}Bot status:${NC}"
             docker compose -f $COMPOSE_FILE ps
             ;;
         7)
             select_environment
             ;;
         0)
-            echo -e "${GREEN}再见!${NC}"
+            echo -e "${GREEN}Goodbye!${NC}"
             exit 0
             ;;
         *)
-            echo -e "${RED}无效选择，请重试${NC}"
+            echo -e "${RED}Invalid selection, please try again.${NC}"
             ;;
     esac
-    
+
     echo ""
-    read -p "按Enter键继续..."
+    read -p "Press Enter to continue..."
     clear
 done 
