@@ -1,6 +1,10 @@
 # 环境变量文件
 .env
 
+# configuration file
+deletion_queue.json 
+deletion_config.json
+
 # Python
 __pycache__/
 *.py[cod]
