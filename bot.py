@@ -261,7 +261,6 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     message_id=reaction.message_id
                 )
                 logger.info(f"Deleted message {reaction.message_id} from group {chat_id} due to 💩 reaction.")
-                await context.bot.send_message(chat_id=chat_id, text="A message has been deleted immediately due to 💩 reaction.")
             except Exception as e:
                 logger.error(f"Failed to delete message: {e}")
             return
@@ -275,7 +274,6 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if thumbs_down_count >= threshold:
         deletion_queue.append({'chat_id': chat_id, 'message_id': reaction.message_id})
         save_deletion_queue()
-        await context.bot.send_message(chat_id=chat_id, text="Message added to deletion queue (👎 reaction). Will be deleted at scheduled time.")
         logger.info(f"Queued message {reaction.message_id} from group {chat_id} due to {thumbs_down_count} 👎 reactions.")
 
 async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
