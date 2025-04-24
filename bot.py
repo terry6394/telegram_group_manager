@@ -46,6 +46,9 @@ if not TOKEN:
     raise ValueError("未设置BOT_TOKEN环境变量。请在.env文件中设置。")
 
 import json
+import openai
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = OPENAI_API_KEY
 
 # 配置文件路径
 GROUPS_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'groups.json')
@@ -56,6 +59,7 @@ DELETION_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'deletion_config.
 monitored_groups: Dict[int, Dict[str, Any]] = {}
 deletion_queue: List[Dict[str, Any]] = []
 deletion_time: str = '00:00'
+classification_prompt: str = ''
 # 保存定时任务引用
 _deletion_job = None
 
@@ -94,18 +98,19 @@ def save_deletion_queue():
         logging.error(f"保存删除队列失败: {e}")
 
 def load_deletion_config():
-    global deletion_time
+    global deletion_time, classification_prompt
     try:
         with open(DELETION_CONFIG_FILE, 'r', encoding='utf-8') as f:
             cfg = json.load(f)
             deletion_time = cfg.get('deletion_time', deletion_time)
+            classification_prompt = cfg.get('classification_prompt', classification_prompt)
     except Exception as e:
         logging.warning(f"加载删除配置失败: {e}")
 
 def save_deletion_config():
     try:
         with open(DELETION_CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump({'deletion_time': deletion_time}, f, ensure_ascii=False, indent=4)
+            json.dump({'deletion_time': deletion_time, 'classification_prompt': classification_prompt}, f, ensure_ascii=False, indent=4)
     except Exception as e:
         logging.error(f"保存删除配置失败: {e}")
 
@@ -453,6 +458,68 @@ async def process_deletion_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
             except Exception as e:
                 logger.error(f"[定时任务] Failed to send completion notification: {e}")
 
+async def set_classification_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /set_classification_prompt command to set LLM classification system prompt"""
+    chat = update.effective_chat
+    if chat.type not in [Chat.GROUP, Chat.SUPERGROUP]:
+        await update.message.reply_text("This command can only be used in groups.")
+        return
+    from telegram import ChatMemberAdministrator, ChatMemberOwner
+    user_member = await context.bot.get_chat_member(chat.id, update.effective_user.id)
+    if not isinstance(user_member, (ChatMemberAdministrator, ChatMemberOwner)):
+        await update.message.reply_text("Only group admins can set classification prompt.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /set_classification_prompt <prompt text>")
+        return
+    global classification_prompt
+    classification_prompt = ' '.join(context.args)
+    save_deletion_config()
+    await update.message.reply_text("Classification prompt updated.")
+
+async def classify_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Classify each message via LLM and flag for deletion if needed"""
+    message = update.message
+    chat = message.chat
+    if chat.id not in monitored_groups or not classification_prompt or not message.text:
+        return
+    try:
+        system_msg = f"{classification_prompt}\n\n请只回答 'DELETE' 或 'KEEP'。"
+        logger.info(f"[LLM分类] prompt: {system_msg}")
+        logger.info(f"[LLM分类] user message: {message.text}")
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": message.text}
+            ],
+            temperature=0
+        )
+        logger.info(f"[LLM分类] raw response: {response}")
+        decision = response.choices[0].message.content.strip().upper()
+        logger.info(f"[LLM分类] decision: {decision}")
+        if decision.startswith("DELETE"):
+            deletion_queue.append({'chat_id': chat.id, 'message_id': message.message_id})
+            save_deletion_queue()
+            # 1. 使用 Telegram setMessageReaction API 添加 reaction
+            import os
+            import httpx
+            BOT_TOKEN = os.getenv("BOT_TOKEN")
+            reaction_url = f"https://api.telegram.org/bot{BOT_TOKEN}/setMessageReaction"
+            payload = {
+                "chat_id": chat.id,
+                "message_id": message.message_id,
+                "reaction": [{"type": "emoji", "emoji": "🙈"}]
+            }
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(reaction_url, json=payload)
+                    logger.info(f"[LLM分类] setMessageReaction response: {resp.text}")
+            except Exception as e:
+                logger.warning(f"[LLM分类] setMessageReaction API 调用失败: {e}")
+    except Exception as e:
+        logger.error(f"[LLM分类] Failed to classify message: {e}")
+
 if __name__ == "__main__":
     # 创建应用程序
     application = Application.builder().token(TOKEN).build()
@@ -497,6 +564,12 @@ if __name__ == "__main__":
         when=next_run_time
     )
     logger.info(f"[定时任务] Initialized scheduled deletion task for {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # 新增 LLM 分类提示词设置命令
+    application.add_handler(CommandHandler("set_classification_prompt", set_classification_prompt))
+    
+    # 新增 LLM 分类消息处理
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, classify_message))
     
     logger.info("Bot started...")
     

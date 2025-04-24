@@ -6,6 +6,9 @@ dependencies:
   - python=3.9
   - pip>=22.0.0
   - pip:
-    - python-telegram-bot
-    - python-dotenv
+      - python-telegram-bot>=21.7
+      - python-dotenv>=1.0.0
+      - pytz>=2022.1
+      - psutil>=5.9.0
+      - openai==0.28.1
 
