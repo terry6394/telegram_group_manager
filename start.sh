@@ -66,8 +66,18 @@ show_menu() {
     echo -n "Please select: "
 }
 
+# 根据环境选择 LOCK_FILE
+set_lock_file() {
+    if [ "$COMPOSE_FILE" = "docker-compose.prod.yml" ]; then
+        LOCK_FILE="conda-linux-64.lock"
+    else
+        LOCK_FILE="conda-linux-aarch64.lock"
+    fi
+}
+
 # Main loop
 select_environment
+set_lock_file
 
 while true; do
     show_menu
@@ -75,7 +85,15 @@ while true; do
 
     case $choice in
         1)
-            echo -e "${GREEN}Starting the bot...${NC}"
+            echo -e "${GREEN}Regenerating lock file and building image...${NC}"
+            conda-lock lock --file environment.yml
+            if [ "$COMPOSE_FILE" = "docker-compose.prod.yml" ]; then
+                conda-lock render --kind explicit --platform linux-64 conda-lock.yml > conda-linux-64.lock
+            else
+                conda-lock render --kind explicit --platform linux-aarch64 conda-lock.yml > conda-linux-aarch64.lock
+            fi
+            set_lock_file
+            docker compose -f $COMPOSE_FILE build --build-arg LOCK_FILE=$LOCK_FILE --no-cache
             docker compose -f $COMPOSE_FILE up -d
             echo -e "${GREEN}Bot started.${NC}"
             ;;
@@ -94,8 +112,16 @@ while true; do
             docker compose -f $COMPOSE_FILE logs -f
             ;;
         5)
-            echo -e "${YELLOW}Rebuilding and starting the bot...${NC}"
-            docker compose -f $COMPOSE_FILE up -d --build
+            echo -e "${YELLOW}Regenerating lock file and rebuilding the bot...${NC}"
+            conda-lock lock --file environment.yml
+            if [ "$COMPOSE_FILE" = "docker-compose.prod.yml" ]; then
+                conda-lock render --kind explicit --platform linux-64 conda-lock.yml > conda-linux-64.lock
+            else
+                conda-lock render --kind explicit --platform linux-aarch64 conda-lock.yml > conda-linux-aarch64.lock
+            fi
+            set_lock_file
+            docker compose -f $COMPOSE_FILE build --build-arg LOCK_FILE=$LOCK_FILE --no-cache
+            docker compose -f $COMPOSE_FILE up -d
             echo -e "${GREEN}Bot rebuilt and started.${NC}"
             ;;
         6)
@@ -104,6 +130,7 @@ while true; do
             ;;
         7)
             select_environment
+            set_lock_file
             ;;
         0)
             echo -e "${GREEN}Goodbye!${NC}"

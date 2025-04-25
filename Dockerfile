@@ -3,12 +3,12 @@ FROM continuumio/miniconda3:4.12.0
 
 WORKDIR /app
 
-# 复制环境文件和代码
-COPY environment.yml ./
+# 多平台自动构建支持
+ARG LOCK_FILE=conda-linux-64.lock
+COPY ${LOCK_FILE} ./
 COPY . .
 
-# 创建并激活环境，安装依赖
-RUN conda env update -f environment.yml --prune && \
+RUN conda create -n telegram-bot --file ${LOCK_FILE} && \
     conda clean -afy
 
 # 确保健康检查脚本是可执行的
