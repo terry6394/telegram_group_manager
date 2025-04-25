@@ -92,7 +92,15 @@ def load_deletion_queue():
     global deletion_queue
     try:
         with open(DELETION_QUEUE_FILE, 'r', encoding='utf-8') as f:
-            deletion_queue = json.load(f)
+            data = json.load(f)
+        if isinstance(data, list):
+            deletion_queue = data
+        elif isinstance(data, dict):
+            deletion_queue = [data]
+            logging.warning("deletion_queue.json contains an object, converted to list")
+        else:
+            deletion_queue = []
+            logging.warning("deletion_queue.json unexpected format, reset to empty list")
     except Exception as e:
         logging.warning(f"加载删除队列失败: {e}")
         deletion_queue = []
