@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   telegram-bot:
     build: .
@@ -20,4 +18,4 @@ services:
 
 networks:
   bot-network:
-    driver: bridge 
+    driver: bridge

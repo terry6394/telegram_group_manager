@@ -47,8 +47,15 @@ if not TOKEN:
 
 import json
 import openai
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+import httpx
+
+# LLM 配置（可由管理员通过 /llm_config 设置，默认值）
+llm_config = {
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "api_key": ""
+}
+# openai 配置将由 load_deletion_config 读取并应用
 
 # 配置文件路径
 GROUPS_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'groups.json')
@@ -98,21 +105,32 @@ def save_deletion_queue():
         logging.error(f"保存删除队列失败: {e}")
 
 def load_deletion_config():
-    global deletion_time, classification_prompt
+    global deletion_time, classification_prompt, llm_config
     try:
         with open(DELETION_CONFIG_FILE, 'r', encoding='utf-8') as f:
             cfg = json.load(f)
             deletion_time = cfg.get('deletion_time', deletion_time)
             classification_prompt = cfg.get('classification_prompt', classification_prompt)
+            # 新增 LLM 配置加载
+            if 'llm_config' in cfg:
+                llm_config.update(cfg['llm_config'])
     except Exception as e:
         logging.warning(f"加载删除配置失败: {e}")
+    # 应用 LLM 配置到 openai
+    openai.api_key = llm_config.get("api_key", "")
+    openai.api_base = llm_config.get("base_url", "https://api.openai.com/v1")
 
 def save_deletion_config():
     try:
         with open(DELETION_CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump({'deletion_time': deletion_time, 'classification_prompt': classification_prompt}, f, ensure_ascii=False, indent=4)
+            json.dump({
+                'deletion_time': deletion_time,
+                'classification_prompt': classification_prompt,
+                'llm_config': llm_config
+            }, f, ensure_ascii=False, indent=4)
     except Exception as e:
         logging.error(f"保存删除配置失败: {e}")
+
 
 # 启动时加载配置
 def initialize_monitored_groups():
@@ -142,7 +160,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "  /status - Show current group status and pending deletions\n"
         "  /set_deletion_time HH:MM - Schedule daily deletion of 💩-marked messages at given time\n"
         "  /trigger_deletion - Manually trigger batch deletion now\n"
-        "  /set_classification_prompt <prompt> - Set LLM classification prompt (admin only)\n\n"
+        "  /set_classification_prompt [prompt text] - Set LLM classification prompt (admin only)\n\n"
         "<b>Features:</b>\n"
         "  • LLM-based moderation: Each message is classified by LLM. If classified as DELETE, the bot will react with 🙈 (supported Telegram reaction emoji).\n"
         "  • 💩 reaction: Messages with 1 or more 💩 reactions are deleted immediately.\n"
@@ -490,11 +508,15 @@ async def classify_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if chat.id not in monitored_groups or not classification_prompt or not message.text:
         return
     try:
+        # 动态设置 openai 配置
+        openai.api_key = llm_config.get("api_key", "")
+        openai.api_base = llm_config.get("base_url", "https://api.openai.com/v1")
+        model = llm_config.get("model", "gpt-4o-mini")
         system_msg = f"{classification_prompt}\n\n请只回答 'DELETE' 或 'KEEP'。"
         logger.info(f"[LLM分类] prompt: {system_msg}")
         logger.info(f"[LLM分类] user message: {message.text}")
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model=model,
             messages=[
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": message.text}
@@ -526,6 +548,33 @@ async def classify_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception as e:
         logger.error(f"[LLM分类] Failed to classify message: {e}")
 
+async def llm_config_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """管理员设置 LLM 配置 (base_url, model, apikey)"""
+    chat = update.effective_chat
+    user = update.effective_user
+    if chat.type not in [Chat.GROUP, Chat.SUPERGROUP]:
+        await update.message.reply_text("This command can only be used in groups.")
+        return
+    from telegram import ChatMemberAdministrator, ChatMemberOwner
+    user_member = await context.bot.get_chat_member(chat.id, user.id)
+    if not isinstance(user_member, (ChatMemberAdministrator, ChatMemberOwner)):
+        await update.message.reply_text("Only group admins can set LLM config.")
+        return
+    if len(context.args) != 3:
+        await update.message.reply_text(
+            "Usage: /llm_config <base_url> <model> <apikey>\n"
+            "Example: /llm_config https://api.groq.com/openai/v1 llama3-70b-8192 YOUR_API_KEY"
+        )
+        return
+    global llm_config
+    llm_config["base_url"] = context.args[0]
+    llm_config["model"] = context.args[1]
+    llm_config["api_key"] = context.args[2]
+    save_deletion_config()
+    await update.message.reply_text(
+        f"LLM 配置已更新:\nBase URL: {llm_config['base_url']}\nModel: {llm_config['model']}\nAPI Key: {'*' * len(llm_config['api_key']) if llm_config['api_key'] else '(empty)'}"
+    )
+
 if __name__ == "__main__":
     # 创建应用程序
     application = Application.builder().token(TOKEN).build()
@@ -537,6 +586,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("stopmonitor", stop_monitor))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("set_deletion_time", set_deletion_time))
+    application.add_handler(CommandHandler("llm_config", llm_config_command))
     
     # 手动触发删除命令
     async def trigger_deletion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
