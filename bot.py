@@ -433,6 +433,15 @@ async def process_deletion_queue_wrapper(context):
     await schedule_next_deletion(context)
 
 async def process_deletion_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
+    # 过滤无效 entry
+    global deletion_queue
+    valid_entries = [
+        entry for entry in deletion_queue
+        if isinstance(entry, dict) and 'chat_id' in entry and 'message_id' in entry
+    ]
+    if len(valid_entries) < len(deletion_queue):
+        logger.warning(f"Found invalid entries in deletion_queue, will ignore them. Total: {len(deletion_queue)}, valid: {len(valid_entries)}")
+    deletion_queue = valid_entries
     """批量删除待处理队列中的消息"""
     global deletion_queue
     bot = context.bot
