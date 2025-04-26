@@ -2,8 +2,6 @@
 .env
 
 # configuration file
-deletion_queue.json 
-deletion_config.json
 
 # Python
 __pycache__/
@@ -41,6 +39,7 @@ logs/
 *.log
 
 # Docker
-.docker/
-docker-compose.override.yml
 
+data/deletion_config.json
+data/deletion_queue.json
+data/groups.json
