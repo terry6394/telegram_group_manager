@@ -471,17 +471,19 @@ async def process_deletion_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
     
     # 执行删除
     deleted_count = 0
+    successful_deletions = []
     for entry in deletion_queue:
         try:
             await bot.delete_message(chat_id=entry['chat_id'], message_id=entry['message_id'])
             logger.info(f"[定时任务] Deleted message {entry['message_id']} from group {entry['chat_id']}")
             deleted_count += 1
+            successful_deletions.append(entry)
             await asyncio.sleep(1)
         except Exception as e:
             logger.error(f"[定时任务] Failed to delete message: chat_id={entry['chat_id']} message_id={entry['message_id']} error: {e}")
             failed.append(entry)
     
-    # 更新队列
+    # 更新队列 - 只保留失败的消息
     deletion_queue = failed
     save_deletion_queue()
     logger.info("[定时任务] Batch deletion task completed, remaining messages: %d", len(deletion_queue))
