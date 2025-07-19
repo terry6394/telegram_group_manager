@@ -58,9 +58,14 @@ llm_config = {
 # openai 配置将由 load_deletion_config 读取并应用
 
 # 配置文件路径
-GROUPS_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'groups.json')
-DELETION_QUEUE_FILE = os.path.join(os.path.dirname(__file__), 'deletion_queue.json')
-DELETION_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'deletion_config.json')
+# 数据目录设置
+DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# 配置文件路径
+GROUPS_CONFIG_FILE = os.path.join(DATA_DIR, 'groups.json')
+DELETION_QUEUE_FILE = os.path.join(DATA_DIR, 'deletion_queue.json')
+DELETION_CONFIG_FILE = os.path.join(DATA_DIR, 'deletion_config.json')
 
 # 存储需要监控的群组
 monitored_groups: Dict[int, Dict[str, Any]] = {}
