@@ -13,12 +13,20 @@ LOG_FILE="$REPO_DIR/logs/deploy.log"
 PID_FILE="$REPO_DIR/logs/${SCRIPT_NAME}.pid"
 VENV_DIR="$REPO_DIR/venv"
 
-# 颜色输出
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# 颜色输出 - 检测是否支持彩色
+if [ -t 1 ] && [ "$TERM" != "dumb" ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m'
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    NC=''
+fi
 
 # 日志函数
 log() {
@@ -40,26 +48,26 @@ info() {
 # 显示帮助信息
 show_help() {
     cat << EOF
-${GREEN}Telegram Group Manager - 部署与卸载工具${NC}
+Telegram Group Manager - 部署与卸载工具
 
-${YELLOW}用法:${NC}
+用法:
     $0 [命令] [选项]
 
-${YELLOW}命令:${NC}
-    ${GREEN}install${NC}     安装并启动服务（首次部署）
-    ${GREEN}start${NC}       启动服务
-    ${GREEN}stop${NC}        停止服务
-    ${GREEN}restart${NC}     重启服务
-    ${GREEN}status${NC}      查看服务状态
-    ${GREEN}update${NC}      更新代码并重启
-    ${GREEN}uninstall${NC}   完全卸载（包括环境）
-    ${GREEN}logs${NC}        查看实时日志
-    ${GREEN}help${NC}        显示此帮助信息
+命令:
+    install     安装并启动服务（首次部署）
+    start       启动服务
+    stop        停止服务
+    restart     重启服务
+    status      查看服务状态
+    update      更新代码并重启
+    uninstall   完全卸载（包括环境）
+    logs        查看实时日志
+    help        显示此帮助信息
 
-${YELLOW}选项:${NC}
-    ${BLUE}-f, --force${NC}   强制操作（跳过确认）
+选项:
+    -f, --force   强制操作（跳过确认）
 
-${YELLOW}示例:${NC}
+示例:
     $0 install          # 首次安装
     $0 start            # 启动服务
     $0 stop             # 停止服务
@@ -226,22 +234,23 @@ update_service() {
 
 # 查看状态
 show_status() {
-    echo -e "${GREEN}=== Telegram Group Manager 状态 ===${NC}"
+    echo "=== Telegram Group Manager 状态 ==="
     
     local status=$(check_status)
     local pid=$(get_pid)
     
     if [ "$status" = "running" ]; then
-        echo -e "状态: ${GREEN}运行中${NC} (PID: $pid)"
+        echo "状态: 运行中 (PID: $pid)"
         echo "日志文件: $LOG_FILE"
         echo "配置文件: $REPO_DIR/.env"
     else
-        echo -e "状态: ${RED}已停止${NC}"
+        echo "状态: 已停止"
     fi
     
     # 显示最近的日志
     if [ -f "$LOG_FILE" ]; then
-        echo -e "\n${YELLOW}最近日志:${NC}"
+        echo ""
+        echo "最近日志:"
         tail -n 5 "$LOG_FILE" 2>/dev/null || echo "无日志"
     fi
 }
@@ -257,7 +266,7 @@ show_logs() {
 
 # 卸载服务
 uninstall_service() {
-    echo -e "${RED}⚠️  警告：这将完全卸载 Telegram Group Manager${NC}"
+    echo "警告：这将完全卸载 Telegram Group Manager"
     echo "此操作将："
     echo "  - 停止并删除服务"
     echo "  - 删除虚拟环境"
