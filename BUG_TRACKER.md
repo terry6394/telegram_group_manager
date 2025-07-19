@@ -55,7 +55,7 @@
 
 | 缺陷编号 | 状态 | 严重级别 | 描述 | 修复人 | 完成时间 |
 |----------|------|----------|------|--------|----------|
-| BUG-0.6-001 | ✅ 已修复 | Medium | deletion_queue.json 清理不完整 | Claude | 2025-07-19 13:45 |
+| BUG-0.6-001 | ✅ 已修复 | Medium | deletion_queue.json 清理不完整 | Claude | 2025-07-19 16:02 |
 
 ## 版本标签
 
@@ -94,7 +94,13 @@
 
 **期望结果**: [deletion_queue.json中的消息被正确删除,如果部分群组的消息删除失败, deletion_queue.json 中的消息也应该被删除]
 
-**实际结果**: [/trigger_deletion执行完成后,deletion_queue.json中的待删除列表没有完全被清空]
+**实际结果**: [/trigger_deletion执行完成后,deletion_queue.json中的待删除列表没有完全被清空
+Group Monitoring Status
+Group Name: 🏖The English Sea World Clean Beach
+Group ID: -1002449863402
+Current Time: 2025-07-19 16:01:35
+💩 Pending Deletions: 219 messages
+]
 
 **错误信息**: [无]
 

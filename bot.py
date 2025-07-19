@@ -488,10 +488,10 @@ async def process_deletion_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.error(f"[定时任务] Failed to delete message: chat_id={entry['chat_id']} message_id={entry['message_id']} error: {e}")
             failed.append(entry)
     
-    # 更新队列 - 只保留失败的消息
-    deletion_queue = failed
+    # 更新队列 - 清除所有消息，不保留失败的消息
+    deletion_queue = []
     save_deletion_queue()
-    logger.info("[定时任务] Batch deletion task completed, remaining messages: %d", len(deletion_queue))
+    logger.info("[定时任务] Batch deletion task completed, all messages cleared from queue")
     
     # 完成时发送通知
     for chat_id in chat_ids:
