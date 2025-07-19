@@ -145,11 +145,19 @@ install_service() {
         python3 -m venv "$VENV_DIR"
     fi
     
-    # 激活虚拟环境并安装依赖
+    # 安装 Python 依赖
     log "安装 Python 依赖..."
-    source "$VENV_DIR/bin/activate"
-    pip install --upgrade pip
-    pip install -r requirements.txt
+    
+    # 使用 requirements.txt（推荐方式）
+    if [ -f "$REPO_DIR/requirements.txt" ]; then
+        source "$VENV_DIR/bin/activate"
+        pip install --upgrade pip
+        pip install -r "$REPO_DIR/requirements.txt"
+        log "依赖安装完成（使用 requirements.txt）"
+    else
+        error "未找到 requirements.txt 文件"
+        exit 1
+    fi
     
     # 启动服务
     start_service
@@ -169,9 +177,21 @@ start_service() {
         return 0
     fi
     
-    source "$VENV_DIR/bin/activate"
+    # 根据环境类型启动
+    if [ -f "$REPO_DIR/requirements.txt" ]; then
+        # 使用虚拟环境
+        source "$VENV_DIR/bin/activate"
+        nohup python "$REPO_DIR/bot.py" > "$LOG_FILE" 2>&1 &
+    elif [ -f "$REPO_DIR/environment.yml" ]; then
+        # 使用 conda 环境
+        source "$(conda info --base)/etc/profile.d/conda.sh"
+        conda activate "$ENV_NAME"
+        nohup python "$REPO_DIR/bot.py" > "$LOG_FILE" 2>&1 &
+    else
+        error "未找到依赖配置文件"
+        exit 1
+    fi
     
-    nohup python "$REPO_DIR/bot.py" > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
     
     sleep 2
